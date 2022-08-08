@@ -1,7 +1,6 @@
 package flusher
 
 import (
-	"fmt"
 	"github.com/dimonrus/porterr"
 	"sync"
 	"time"
@@ -45,7 +44,6 @@ func (f *FlushQueue[T]) idle(workers uint8, period time.Duration) (e porterr.IEr
 				case <-f.stop:
 					return
 				default:
-					fmt.Println("worker is:", w)
 					e = f.Flush()
 					if e != nil {
 						return
