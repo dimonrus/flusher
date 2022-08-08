@@ -16,9 +16,9 @@ type FlushItem struct {
 
 - You need to implement your own flush method according to signature
 ```
-func(block []*T) (e porterr.IError)
+func(block []*T) (failed []*T)
 // for example flush operation can take 5 second
-func testFlusher(block []*FlushItem) (e porterr.IError) {
+func testFlusher(block []*FlushItem) (failed []*FlushItem) {
 	time.Sleep(time.Second * 5)
 	fmt.Println(len(block), "items flushed")
 	return

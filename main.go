@@ -1,13 +1,12 @@
 package flusher
 
 import (
-	"github.com/dimonrus/porterr"
 	"sync"
 	"time"
 )
 
 const (
-	// DefaultFlusherPackLen default count of blocks in one pack
+	// DefaultFlusherPackLen default count of items in one pack
 	DefaultFlusherPackLen = 5000
 
 	// DefaultParallelCountFlusher default number of async flusher
@@ -23,34 +22,33 @@ type FlushQueue[T any] struct {
 	m sync.RWMutex
 	// blocks with entity
 	blocks [][]*T
+	// failed block
+	failed failedItems[T]
 	// current blocks position
 	cursor int
 	// count of blocks in pack
 	packSize int
 	// flusher callback
-	flusher func(block []*T) (e porterr.IError)
+	flusher func(block []*T) (failed []*T)
 	// stop idle
 	stop chan struct{}
 }
 
 // idle idle for flush items
-func (f *FlushQueue[T]) idle(workers uint8, period time.Duration) (e porterr.IError) {
-	timer := time.NewTicker(period)
+func (f *FlushQueue[T]) idle(workers uint8, period time.Duration) {
+	ticker := time.NewTicker(period)
 	// create workers
 	for i := uint8(0); i < workers; i++ {
-		go func(w uint8) {
-			for range timer.C {
+		go func() {
+			for range ticker.C {
 				select {
 				case <-f.stop:
 					return
 				default:
-					e = f.Flush()
-					if e != nil {
-						return
-					}
+					f.Flush()
 				}
 			}
-		}(i)
+		}()
 	}
 	return
 }
@@ -69,7 +67,9 @@ func (f *FlushQueue[T]) Len() int {
 }
 
 // Flusher set flusher
-func (f *FlushQueue[T]) Flusher(flusher func(block []*T) (e porterr.IError)) *FlushQueue[T] {
+func (f *FlushQueue[T]) Flusher(flusher func(block []*T) (failed []*T)) *FlushQueue[T] {
+	f.m.Lock()
+	defer f.m.Unlock()
 	f.flusher = flusher
 	return f
 }
@@ -82,13 +82,21 @@ func (f *FlushQueue[T]) grow() {
 }
 
 // AddItem add item to queue
-func (f *FlushQueue[T]) AddItem(item *T) {
+func (f *FlushQueue[T]) AddItem(item ...*T) {
 	f.m.Lock()
 	defer f.m.Unlock()
-	if len(f.blocks) == 0 || len(f.blocks[f.cursor]) >= f.packSize {
-		f.grow()
+	f.add(item...)
+	return
+}
+
+// AddItem add item to queue
+func (f *FlushQueue[T]) add(item ...*T) {
+	for _, t := range item {
+		if len(f.blocks) == 0 || len(f.blocks[f.cursor]) >= f.packSize {
+			f.grow()
+		}
+		f.blocks[f.cursor] = append(f.blocks[f.cursor], t)
 	}
-	f.blocks[f.cursor] = append(f.blocks[f.cursor], item)
 	return
 }
 
@@ -102,7 +110,7 @@ func (f *FlushQueue[T]) Reset() {
 }
 
 // Flush performs flush action
-func (f *FlushQueue[T]) Flush() (e porterr.IError) {
+func (f *FlushQueue[T]) Flush() {
 	f.m.Lock()
 	if len(f.blocks) > 0 {
 		items := f.blocks[0]
@@ -112,29 +120,68 @@ func (f *FlushQueue[T]) Flush() (e porterr.IError) {
 		}
 		f.m.Unlock()
 		if f.flusher != nil {
-			e = f.flusher(items)
+			filed := f.flusher(items)
+			if len(filed) > 0 {
+				f.failed.AddItem(filed...)
+			}
 		}
 	} else {
+		if f.failed.Len() > 0 {
+			f.add(f.failed.Extract()...)
+		}
 		f.m.Unlock()
 	}
 	return
 }
 
 // Idle and Flush
-func (f *FlushQueue[T]) Idle(workers uint8, flushPeriod time.Duration) porterr.IError {
+func (f *FlushQueue[T]) Idle(workers uint8, flushPeriod time.Duration) {
 	if workers == 0 {
 		workers = DefaultParallelCountFlusher
 	}
 	if flushPeriod == 0 {
 		flushPeriod = DefaultFlushPeriod
 	}
-	return f.idle(workers, flushPeriod)
+	f.idle(workers, flushPeriod)
+	return
 }
 
 // NewFlushQueue init new flush queue
-func NewFlushQueue[T any](packSize int, flusher func(block []*T) (e porterr.IError)) *FlushQueue[T] {
+func NewFlushQueue[T any](packSize int, flusher func(block []*T) (filed []*T)) *FlushQueue[T] {
 	if packSize == 0 {
 		packSize = DefaultFlusherPackLen
 	}
 	return &FlushQueue[T]{flusher: flusher, packSize: packSize, stop: make(chan struct{})}
+}
+
+// For failed items
+type failedItems[T any] struct {
+	// mutex
+	m sync.RWMutex
+	// failed items with entity
+	items []*T
+}
+
+// Len get len of queue
+func (f *failedItems[T]) Len() int {
+	f.m.RLock()
+	f.m.RUnlock()
+	return len(f.items)
+}
+
+// AddItem add failed block
+func (f *failedItems[T]) AddItem(item ...*T) *failedItems[T] {
+	f.m.Lock()
+	f.m.Unlock()
+	f.items = append(f.items, item...)
+	return f
+}
+
+// Extract get all failed items
+func (f *failedItems[T]) Extract() []*T {
+	f.m.Lock()
+	f.m.Unlock()
+	items := f.items
+	f.items = f.items[:0]
+	return items
 }

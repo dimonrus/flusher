@@ -3,7 +3,6 @@ package flusher
 import (
 	"fmt"
 	"github.com/dimonrus/gohelp"
-	"github.com/dimonrus/porterr"
 	"testing"
 	"time"
 )
@@ -27,23 +26,29 @@ func getTestItem() *FlushItem {
 	}
 }
 
-func testFlusher(block []*FlushItem) (e porterr.IError) {
-	//for _, item := range block {
-	//	 fmt.Println(item.String())
-	//}
+func testFlusher(block []*FlushItem) (failed []*FlushItem) {
+	rnd := gohelp.GetRndNumber(0, 9)
+	var j int
+	for i, item := range block {
+		if i > rnd {
+			failed = append(failed, item)
+		} else {
+			j++
+		}
+	}
 	time.Sleep(time.Second * 5)
-	fmt.Println(len(block), "items flushed")
+	fmt.Println(j, "items flushed", len(failed), "items failed")
 	return
 }
 
 func TestNewFlushQueue(t *testing.T) {
 	fq := NewFlushQueue[FlushItem](10, testFlusher)
-	_ = fq.Flush()
+	fq.Flush()
 	go fq.Idle(4, 0)
 	for i := 0; i < 100; i++ {
 		fq.AddItem(getTestItem())
 	}
-	time.Sleep(time.Second * 16)
+	time.Sleep(time.Second * 30)
 	if fq.Len() != 0 {
 		t.Fatal("must be 0 len")
 	}
@@ -55,4 +60,13 @@ func TestNewFlushQueue(t *testing.T) {
 	}
 	fq.Reset()
 	fq.Flusher(nil)
+}
+
+func BenchmarkAdd(b *testing.B) {
+	fq := NewFlushQueue[FlushItem](10, testFlusher)
+	item := getTestItem()
+	for i := 0; i < b.N; i++ {
+		fq.AddItem(item)
+	}
+	b.ReportAllocs()
 }
