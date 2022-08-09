@@ -111,29 +111,38 @@ func (f *FlushQueue[T]) Reset() {
 
 // Flush performs flush action
 func (f *FlushQueue[T]) Flush() {
-	f.m.Lock()
-	if len(f.blocks) > 0 {
-		items := f.blocks[0]
-		f.blocks = f.blocks[1:]
-		if f.cursor > 0 {
-			f.cursor--
-		}
-		if f.flusher != nil {
-			f.m.Unlock()
-			filed := f.flusher(items)
-			if len(filed) > 0 {
-				f.m.Lock()
-				f.failed = append(f.failed, filed...)
-				f.m.Unlock()
-			}
-		} else {
-			f.m.Unlock()
-		}
-	} else {
+	// if not items or no flusher defined return
+	f.m.RLock()
+	if f.flusher == nil {
+		f.m.RUnlock()
+		return
+	}
+	// if failed items exists
+	if len(f.blocks) == 0 {
 		if len(f.failed) > 0 {
+			f.m.RUnlock()
+			f.m.Lock()
 			f.add(f.failed...)
 			f.failed = f.failed[:0]
+			f.m.Unlock()
+		} else {
+			f.m.RUnlock()
+			return
 		}
+	} else {
+		f.m.RUnlock()
+	}
+	f.m.Lock()
+	items := f.blocks[0]
+	f.blocks = f.blocks[1:]
+	if f.cursor > 0 {
+		f.cursor--
+	}
+	f.m.Unlock()
+	filed := f.flusher(items)
+	if len(filed) > 0 {
+		f.m.Lock()
+		f.failed = append(f.failed, filed...)
 		f.m.Unlock()
 	}
 	return

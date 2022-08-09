@@ -40,7 +40,6 @@ func testFlusher(block []*FlushItem) (failed []*FlushItem) {
 			j++
 		}
 	}
-	time.Sleep(time.Second)
 	fmt.Println(j, "items flushed", len(failed), "items failed", "success total:", atomic.LoadInt32(&total))
 	return
 }
@@ -54,7 +53,9 @@ func TestNewFlushQueue(t *testing.T) {
 			fq.AddItem(getTestItem())
 		}()
 	}
-	time.Sleep(time.Second * 30)
+	for atomic.LoadInt32(&total) != 100 {
+		time.Sleep(time.Millisecond * 100)
+	}
 	if fq.Len() != 0 {
 		t.Fatal("must be 0 len")
 	}
