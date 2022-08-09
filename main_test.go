@@ -3,6 +3,7 @@ package flusher
 import (
 	"fmt"
 	"github.com/dimonrus/gohelp"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -26,6 +27,8 @@ func getTestItem() *FlushItem {
 	}
 }
 
+var total int32
+
 func testFlusher(block []*FlushItem) (failed []*FlushItem) {
 	rnd := gohelp.GetRndNumber(0, 9)
 	var j int
@@ -33,11 +36,12 @@ func testFlusher(block []*FlushItem) (failed []*FlushItem) {
 		if i > rnd {
 			failed = append(failed, item)
 		} else {
+			atomic.AddInt32(&total, 1)
 			j++
 		}
 	}
-	time.Sleep(time.Second * 5)
-	fmt.Println(j, "items flushed", len(failed), "items failed")
+	time.Sleep(time.Second)
+	fmt.Println(j, "items flushed", len(failed), "items failed", "success total:", atomic.LoadInt32(&total))
 	return
 }
 
@@ -46,7 +50,9 @@ func TestNewFlushQueue(t *testing.T) {
 	fq.Flush()
 	go fq.Idle(4, 0)
 	for i := 0; i < 100; i++ {
-		fq.AddItem(getTestItem())
+		go func() {
+			fq.AddItem(getTestItem())
+		}()
 	}
 	time.Sleep(time.Second * 30)
 	if fq.Len() != 0 {
@@ -67,6 +73,18 @@ func BenchmarkAdd(b *testing.B) {
 	item := getTestItem()
 	for i := 0; i < b.N; i++ {
 		fq.AddItem(item)
+	}
+	b.ReportAllocs()
+}
+
+func BenchmarkFlushQueue_Flush(b *testing.B) {
+	fq := NewFlushQueue[FlushItem](10, testFlusher)
+	for i := 0; i < 10; i++ {
+		fq.AddItem(getTestItem())
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fq.Flush()
 	}
 	b.ReportAllocs()
 }

@@ -22,8 +22,8 @@ type FlushQueue[T any] struct {
 	m sync.RWMutex
 	// blocks with entity
 	blocks [][]*T
-	// failed block
-	failed failedItems[T]
+	// failed items
+	failed []*T
 	// current blocks position
 	cursor int
 	// count of blocks in pack
@@ -118,16 +118,21 @@ func (f *FlushQueue[T]) Flush() {
 		if f.cursor > 0 {
 			f.cursor--
 		}
-		f.m.Unlock()
 		if f.flusher != nil {
+			f.m.Unlock()
 			filed := f.flusher(items)
 			if len(filed) > 0 {
-				f.failed.AddItem(filed...)
+				f.m.Lock()
+				f.failed = append(f.failed, filed...)
+				f.m.Unlock()
 			}
+		} else {
+			f.m.Unlock()
 		}
 	} else {
-		if f.failed.Len() > 0 {
-			f.add(f.failed.Extract()...)
+		if len(f.failed) > 0 {
+			f.add(f.failed...)
+			f.failed = f.failed[:0]
 		}
 		f.m.Unlock()
 	}
@@ -152,36 +157,4 @@ func NewFlushQueue[T any](packSize int, flusher func(block []*T) (filed []*T)) *
 		packSize = DefaultFlusherPackLen
 	}
 	return &FlushQueue[T]{flusher: flusher, packSize: packSize, stop: make(chan struct{})}
-}
-
-// For failed items
-type failedItems[T any] struct {
-	// mutex
-	m sync.RWMutex
-	// failed items with entity
-	items []*T
-}
-
-// Len get len of queue
-func (f *failedItems[T]) Len() int {
-	f.m.RLock()
-	f.m.RUnlock()
-	return len(f.items)
-}
-
-// AddItem add failed block
-func (f *failedItems[T]) AddItem(item ...*T) *failedItems[T] {
-	f.m.Lock()
-	f.m.Unlock()
-	f.items = append(f.items, item...)
-	return f
-}
-
-// Extract get all failed items
-func (f *failedItems[T]) Extract() []*T {
-	f.m.Lock()
-	f.m.Unlock()
-	items := f.items
-	f.items = f.items[:0]
-	return items
 }
