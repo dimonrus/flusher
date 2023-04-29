@@ -43,6 +43,7 @@ func (f *FlushQueue[T]) idle(workers uint8, period time.Duration) {
 			for range ticker.C {
 				select {
 				case <-f.stop:
+					ticker.Stop()
 					return
 				default:
 					f.Flush()
